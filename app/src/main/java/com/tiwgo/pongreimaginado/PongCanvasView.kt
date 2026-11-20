@@ -11,6 +11,7 @@ import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
 import androidx.core.content.ContextCompat
+import kotlin.math.abs
 
 class PongCanvasView @JvmOverloads constructor(
     context: Context,
@@ -40,9 +41,12 @@ class PongCanvasView @JvmOverloads constructor(
 
     var accelerationX: Float = 0f
 
-    // Posição central e raio da bola
+    // Posição central, velocidade (px/s) e raio da bola
     private var ballX: Float = 0f
     private var ballY: Float = 0f
+    private var ballVx: Float = 420f
+    private var ballVy: Float = 680f
+    private val baseSpeed: Float = 760f
     private val ballRadius: Float = 26f
     private val auraRadius: Float = 44f
 
@@ -96,8 +100,7 @@ class PongCanvasView @JvmOverloads constructor(
             if (!isInitialized) {
                 player.spawnAtStartLine(newBounds)
                 cpu.spawnAtTopLine(newBounds)
-                ballX = w / 2f
-                ballY = h * 0.35f
+                resetBall(w.toFloat(), h.toFloat(), launchDown = true)
                 isInitialized = true
             } else {
                 bounds?.keepInside(player.rect)
@@ -109,6 +112,78 @@ class PongCanvasView @JvmOverloads constructor(
             updateEnemyPaddleVisual()
             updatePaddleShader()
             updateBallShaders()
+        }
+    }
+
+    private fun resetBall(w: Float, h: Float, launchDown: Boolean) {
+        ballX = w / 2f
+        ballY = h * 0.45f
+        val dirX = if (ballVx >= 0f) 1f else -1f
+        ballVx = dirX * (baseSpeed * 0.55f)
+        ballVy = if (launchDown) baseSpeed else -baseSpeed
+    }
+
+    private fun updateBall(deltaTime: Float, currentBounds: GameBounds) {
+        val leftBound = currentBounds.minBounds.x
+        val rightBound = currentBounds.maxBounds.x
+        val topBound = currentBounds.minBounds.y
+        val bottomBound = currentBounds.maxBounds.y
+
+        ballX += ballVx * deltaTime
+        ballY += ballVy * deltaTime
+
+        // Colisão com paredes laterais
+        if (ballX - ballRadius < leftBound) {
+            ballX = leftBound + ballRadius
+            ballVx = abs(ballVx)
+        } else if (ballX + ballRadius > rightBound) {
+            ballX = rightBound - ballRadius
+            ballVx = -abs(ballVx)
+        }
+
+        // Colisão com a raquete lunar (CPU no topo) quando a bola está subindo
+        val cpuLeft = cpu.rect.x
+        val cpuRight = cpu.rect.x + cpu.rect.width
+        val cpuTop = cpu.rect.y
+        val cpuBottom = cpu.rect.y + cpu.rect.height
+
+        if (ballVy < 0f &&
+            ballY - ballRadius <= cpuBottom &&
+            ballY + ballRadius >= cpuTop &&
+            ballX + ballRadius >= cpuLeft &&
+            ballX - ballRadius <= cpuRight
+        ) {
+            ballY = cpuBottom + ballRadius
+            val paddleCenter = cpuLeft + cpu.rect.width / 2f
+            val hitOffset = ((ballX - paddleCenter) / (cpu.rect.width / 2f)).coerceIn(-1f, 1f)
+            ballVx = hitOffset * (baseSpeed * 0.85f)
+            ballVy = abs(ballVy)
+        }
+
+        // Colisão com a raquete solar (Player embaixo) quando a bola está descendo
+        val pLeft = player.rect.x
+        val pRight = player.rect.x + player.rect.width
+        val pTop = player.rect.y
+        val pBottom = player.rect.y + player.rect.height
+
+        if (ballVy > 0f &&
+            ballY + ballRadius >= pTop &&
+            ballY - ballRadius <= pBottom &&
+            ballX + ballRadius >= pLeft &&
+            ballX - ballRadius <= pRight
+        ) {
+            ballY = pTop - ballRadius
+            val paddleCenter = pLeft + player.rect.width / 2f
+            val hitOffset = ((ballX - paddleCenter) / (player.rect.width / 2f)).coerceIn(-1f, 1f)
+            ballVx = hitOffset * (baseSpeed * 0.85f)
+            ballVy = -abs(ballVy)
+        }
+
+        // Saiu por cima (ponto do Player) ou por baixo (ponto da CPU) -> reinicia no centro
+        if (ballY + ballRadius < topBound) {
+            resetBall(rightBound - leftBound, bottomBound - topBound, launchDown = true)
+        } else if (ballY - ballRadius > bottomBound) {
+            resetBall(rightBound - leftBound, bottomBound - topBound, launchDown = false)
         }
     }
 
@@ -188,11 +263,15 @@ class PongCanvasView @JvmOverloads constructor(
         // 1. Player (Solar - embaixo) via acelerômetro
         player.updateWithAccelerometer(Vector2(accelerationX, 0f), currentBounds)
 
-        // 2. CPU (Lunar - topo) acompanhando a bola
+        // 2. Bola se movendo e quicando
+        updateBall(deltaTime, currentBounds)
+
+        // 3. CPU (Lunar - topo) acompanhando a bola
         cpu.updateTowardBall(ballX, currentBounds)
 
         updateEnemyPaddleVisual()
         updatePaddleShader()
+        updateBallShaders()
         invalidate()
     }
 
