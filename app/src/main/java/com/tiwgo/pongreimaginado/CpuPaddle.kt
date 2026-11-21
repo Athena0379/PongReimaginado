@@ -21,22 +21,4 @@ class CpuPaddle(
         rect.y = bounds.minBounds.y + topOffset + (rect.height / 2f)
         bounds.keepInside(rect)
     }
-
-    fun updateTowardBall(targetBallX: Float, bounds: GameBounds) {
-        val paddleCenterX = rect.x + (rect.width / 2f)
-        val diffX = targetBallX - paddleCenterX
-        val deadZone = 12f
-
-        val desiredVelocityX = if (abs(diffX) > deadZone) {
-            (diffX * 0.14f).coerceIn(-maxSpeed, maxSpeed)
-        } else {
-            0f
-        }
-
-        // Suavização para o movimento da CPU não ficar robótico demais
-        velocityX += (desiredVelocityX - velocityX) * 0.2f
-        rect.x += velocityX
-
-        bounds.keepInside(rect)
-    }
 }

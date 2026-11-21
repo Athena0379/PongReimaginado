@@ -1,6 +1,7 @@
 package com.tiwgo.pongreimaginado
 
 import android.content.Context
+import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -15,11 +16,17 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
     var isRunning: Boolean = false
         private set
 
+    var currentScore: Int = 0
+        private set
+
     private var lastFrameTimeNanos: Long = 0L
 
     private lateinit var pongCanvasView: PongCanvasView
+    private lateinit var powerUpManager: PowerUpManager
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
+
+    private var hasNavigatedToResults: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,6 +34,13 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         setContentView(R.layout.activity_tela_de_jogo)
 
         pongCanvasView = findViewById(R.id.pongCanvasView)
+        powerUpManager = pongCanvasView.powerUpManager
+        currentScore = pongCanvasView.score
+
+        pongCanvasView.onGameOver = {
+            currentScore = pongCanvasView.score
+            goToResultsScreen()
+        }
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -37,7 +51,9 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         accelerometer?.let { sensor ->
             sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
         }
-        start()
+        if (!hasNavigatedToResults) {
+            start()
+        }
     }
 
     override fun onPause() {
@@ -47,7 +63,7 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
     }
 
     fun start() {
-        if (isRunning) return
+        if (isRunning || hasNavigatedToResults) return
         isRunning = true
         lastFrameTimeNanos = 0L
         Choreographer.getInstance().postFrameCallback(this)
@@ -78,6 +94,21 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
 
     private fun onUpdate(deltaTime: Float) {
         pongCanvasView.update(deltaTime)
+        currentScore = pongCanvasView.score
+    }
+
+    private fun goToResultsScreen() {
+        if (hasNavigatedToResults) return
+        hasNavigatedToResults = true
+        stop()
+        sensorManager.unregisterListener(this)
+
+        // Substitua `Tela_de_Resultados::class.java` pelo nome exato da sua Activity de resultados
+        val intent = Intent(this, Tela_Final_com_Pontuacao::class.java).apply {
+            putExtra("EXTRA_SCORE", currentScore)
+        }
+        startActivity(intent)
+        finish()
     }
 
     override fun onSensorChanged(event: SensorEvent?) {

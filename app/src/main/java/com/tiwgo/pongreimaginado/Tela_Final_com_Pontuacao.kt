@@ -17,9 +17,9 @@ class Tela_Final_com_Pontuacao : AppCompatActivity() {
         val btn_restart =  findViewById<Button>(R.id.btn_restart)
         val btn_iniciar = findViewById<Button>(R.id.btn_iniciar)
 
-        //var pontuacao_calculada = intent.getIntExtra("Total", 0)
-        //var pontuacao: TextView = findViewById(R.id.Pontos)
-        //pontuacao.text = "$pontuacao_calculada"
+        var pontuacao_calculada = intent.getIntExtra("EXTRA_SCORE", 0)
+        var pontuacao: TextView = findViewById(R.id.Pontos)
+        pontuacao.text = "$pontuacao_calculada"
 
         btn_restart.setOnClickListener {
             val intent = Intent(this, Tela_de_Jogo::class.java)

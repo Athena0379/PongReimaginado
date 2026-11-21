@@ -12,6 +12,16 @@ import android.util.AttributeSet
 import android.view.View
 import androidx.core.content.ContextCompat
 import kotlin.math.abs
+import kotlin.random.Random
+
+data class GameBall(
+    var x: Float,
+    var y: Float,
+    var vx: Float,
+    var vy: Float,
+    val radius: Float = 26f,
+    val auraRadius: Float = 44f
+)
 
 class PongCanvasView @JvmOverloads constructor(
     context: Context,
@@ -29,9 +39,15 @@ class PongCanvasView @JvmOverloads constructor(
     val cpu = CpuPaddle(
         customWidth = 220f,
         customHeight = 45f,
-        topOffset = 90f,
-        maxSpeed = 11f
+        topOffset = 90f
     )
+
+    val powerUpManager = PowerUpManager()
+
+    var onGameOver: (() -> Unit)? = null
+
+    var score: Int = 0
+        private set
 
     var bounds: GameBounds? = null
         private set
@@ -41,16 +57,11 @@ class PongCanvasView @JvmOverloads constructor(
 
     var accelerationX: Float = 0f
 
-    // Posição central, velocidade (px/s) e raio da bola
-    private var ballX: Float = 0f
-    private var ballY: Float = 0f
-    private var ballVx: Float = 420f
-    private var ballVy: Float = 680f
     private val baseSpeed: Float = 760f
-    private val ballRadius: Float = 26f
-    private val auraRadius: Float = 44f
+    private val balls = mutableListOf<GameBall>()
+    private var isGameOverTriggered = false
 
-    // Raquete lunar (CPU no topo)
+    // Raquete lunar (topo - alinhada ao X do player)
     private val enemyRect = RectF()
     private val enemyFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -62,6 +73,12 @@ class PongCanvasView @JvmOverloads constructor(
     }
 
     // Paints reutilizados no onDraw
+    private val scorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#66FFFFFF")
+        textSize = 72f
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
     private val paddleGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#33FFB300")
         style = Paint.Style.FILL
@@ -98,100 +115,169 @@ class PongCanvasView @JvmOverloads constructor(
             bounds = newBounds
 
             if (!isInitialized) {
+                score = 0
                 player.spawnAtStartLine(newBounds)
                 cpu.spawnAtTopLine(newBounds)
-                resetBall(w.toFloat(), h.toFloat(), launchDown = true)
+                syncCpuXWithPlayer()
+                balls.clear()
+                createBall(
+                    x = w / 2f,
+                    y = h * 0.45f,
+                    vx = baseSpeed * 0.55f,
+                    vy = baseSpeed
+                )
+                powerUpManager.spawnRandomly(newBounds)
                 isInitialized = true
             } else {
                 bounds?.keepInside(player.rect)
+                syncCpuXWithPlayer()
                 bounds?.keepInside(cpu.rect)
-                ballX = ballX.coerceIn(ballRadius, w - ballRadius)
-                ballY = ballY.coerceIn(ballRadius, h - ballRadius)
+                balls.forEach { ball ->
+                    ball.x = ball.x.coerceIn(ball.radius, w - ball.radius)
+                    ball.y = ball.y.coerceIn(ball.radius, h - ball.radius)
+                }
             }
 
             updateEnemyPaddleVisual()
             updatePaddleShader()
-            updateBallShaders()
         }
     }
 
-    private fun resetBall(w: Float, h: Float, launchDown: Boolean) {
-        ballX = w / 2f
-        ballY = h * 0.45f
-        val dirX = if (ballVx >= 0f) 1f else -1f
-        ballVx = dirX * (baseSpeed * 0.55f)
-        ballVy = if (launchDown) baseSpeed else -baseSpeed
+    /**
+     * Cria e adiciona uma nova bolinha amarela na partida.
+     */
+    fun createBall(
+        x: Float,
+        y: Float,
+        vx: Float? = null,
+        vy: Float? = null
+    ) {
+        val dirX = if (Random.nextBoolean()) 1f else -1f
+        val dirY = if (Random.nextBoolean()) 1f else -1f
+
+        val newBall = GameBall(
+            x = x,
+            y = y,
+            vx = vx ?: (dirX * baseSpeed * 0.6f),
+            vy = vy ?: (dirY * baseSpeed)
+        )
+        balls.add(newBall)
     }
 
-    private fun updateBall(deltaTime: Float, currentBounds: GameBounds) {
+    private fun spawnNewBallFromPowerUp(sourceBall: GameBall, currentBounds: GameBounds) {
+        createBall(
+            x = sourceBall.x,
+            y = sourceBall.y,
+            vx = -sourceBall.vx,
+            vy = if (sourceBall.vy != 0f) -sourceBall.vy else baseSpeed
+        )
+        powerUpManager.spawnRandomly(currentBounds)
+    }
+
+    private fun isPastPunishmentZone(ball: GameBall, currentBounds: GameBounds): Boolean {
+        val passedTop = (ball.y + ball.radius) < currentBounds.minBounds.y
+        val passedBottom = (ball.y - ball.radius) > currentBounds.maxBounds.y
+        return passedTop || passedBottom
+    }
+
+    private fun syncCpuXWithPlayer() {
+        cpu.rect.x = player.rect.x
+        bounds?.keepInside(cpu.rect)
+    }
+
+    private fun updateBalls(deltaTime: Float, currentBounds: GameBounds) {
+        if (isGameOverTriggered) return
+
         val leftBound = currentBounds.minBounds.x
         val rightBound = currentBounds.maxBounds.x
-        val topBound = currentBounds.minBounds.y
-        val bottomBound = currentBounds.maxBounds.y
 
-        ballX += ballVx * deltaTime
-        ballY += ballVy * deltaTime
-
-        // Colisão com paredes laterais
-        if (ballX - ballRadius < leftBound) {
-            ballX = leftBound + ballRadius
-            ballVx = abs(ballVx)
-        } else if (ballX + ballRadius > rightBound) {
-            ballX = rightBound - ballRadius
-            ballVx = -abs(ballVx)
-        }
-
-        // Colisão com a raquete lunar (CPU no topo) quando a bola está subindo
         val cpuLeft = cpu.rect.x
         val cpuRight = cpu.rect.x + cpu.rect.width
         val cpuTop = cpu.rect.y
         val cpuBottom = cpu.rect.y + cpu.rect.height
 
-        if (ballVy < 0f &&
-            ballY - ballRadius <= cpuBottom &&
-            ballY + ballRadius >= cpuTop &&
-            ballX + ballRadius >= cpuLeft &&
-            ballX - ballRadius <= cpuRight
-        ) {
-            ballY = cpuBottom + ballRadius
-            val paddleCenter = cpuLeft + cpu.rect.width / 2f
-            val hitOffset = ((ballX - paddleCenter) / (cpu.rect.width / 2f)).coerceIn(-1f, 1f)
-            ballVx = hitOffset * (baseSpeed * 0.85f)
-            ballVy = abs(ballVy)
-        }
-
-        // Colisão com a raquete solar (Player embaixo) quando a bola está descendo
         val pLeft = player.rect.x
         val pRight = player.rect.x + player.rect.width
         val pTop = player.rect.y
         val pBottom = player.rect.y + player.rect.height
 
-        if (ballVy > 0f &&
-            ballY + ballRadius >= pTop &&
-            ballY - ballRadius <= pBottom &&
-            ballX + ballRadius >= pLeft &&
-            ballX - ballRadius <= pRight
-        ) {
-            ballY = pTop - ballRadius
-            val paddleCenter = pLeft + player.rect.width / 2f
-            val hitOffset = ((ballX - paddleCenter) / (player.rect.width / 2f)).coerceIn(-1f, 1f)
-            ballVx = hitOffset * (baseSpeed * 0.85f)
-            ballVy = -abs(ballVy)
+        val ballsThatConsumedPowerUp = mutableListOf<GameBall>()
+        val iterator = balls.iterator()
+
+        while (iterator.hasNext()) {
+            val ball = iterator.next()
+
+            ball.x += ball.vx * deltaTime
+            ball.y += ball.vy * deltaTime
+
+            // Colisão com paredes laterais
+            if (ball.x - ball.radius < leftBound) {
+                ball.x = leftBound + ball.radius
+                ball.vx = abs(ball.vx)
+            } else if (ball.x + ball.radius > rightBound) {
+                ball.x = rightBound - ball.radius
+                ball.vx = -abs(ball.vx)
+            }
+
+            // Colisão com a raquete do topo quando a bola está subindo -> +1 ponto
+            if (ball.vy < 0f &&
+                ball.y - ball.radius <= cpuBottom &&
+                ball.y + ball.radius >= cpuTop &&
+                ball.x + ball.radius >= cpuLeft &&
+                ball.x - ball.radius <= cpuRight
+            ) {
+                ball.y = cpuBottom + ball.radius
+                val paddleCenter = cpuLeft + cpu.rect.width / 2f
+                val hitOffset = ((ball.x - paddleCenter) / (cpu.rect.width / 2f)).coerceIn(-1f, 1f)
+                ball.vx = hitOffset * (baseSpeed * 0.85f)
+                ball.vy = abs(ball.vy)
+                score++
+            }
+
+            // Colisão com a raquete de baixo quando a bola está descendo -> +1 ponto
+            if (ball.vy > 0f &&
+                ball.y + ball.radius >= pTop &&
+                ball.y - ball.radius <= pBottom &&
+                ball.x + ball.radius >= pLeft &&
+                ball.x - ball.radius <= pRight
+            ) {
+                ball.y = pTop - ball.radius
+                val paddleCenter = pLeft + player.rect.width / 2f
+                val hitOffset = ((ball.x - paddleCenter) / (player.rect.width / 2f)).coerceIn(-1f, 1f)
+                ball.vx = hitOffset * (baseSpeed * 0.85f)
+                ball.vy = -abs(ball.vy)
+                score++
+            }
+
+            // Colisão com o power-up
+            if (powerUpManager.isHitByBall(ball.x, ball.y, ball.radius)) {
+                ballsThatConsumedPowerUp.add(ball)
+            }
+
+            // Zona de punição: destrói a bolinha em vez de resetar
+            if (isPastPunishmentZone(ball, currentBounds)) {
+                iterator.remove()
+            }
         }
 
-        // Saiu por cima (ponto do Player) ou por baixo (ponto da CPU) -> reinicia no centro
-        if (ballY + ballRadius < topBound) {
-            resetBall(rightBound - leftBound, bottomBound - topBound, launchDown = true)
-        } else if (ballY - ballRadius > bottomBound) {
-            resetBall(rightBound - leftBound, bottomBound - topBound, launchDown = false)
+        // Gera nova bolinha e reposiciona o power-up após iterar com segurança
+        for (source in ballsThatConsumedPowerUp) {
+            spawnNewBallFromPowerUp(source, currentBounds)
+        }
+
+        // Sem bolinhas restantes -> encerra o jogo e vai para a tela de resultados
+        if (balls.isEmpty() && !isGameOverTriggered) {
+            isGameOverTriggered = true
+            powerUpManager.orb.isActive = false
+            onGameOver?.invoke()
         }
     }
 
     private fun updateEnemyPaddleVisual() {
-        val left = cpu.rect.left
-        val top = cpu.rect.top
-        val right = cpu.rect.right
-        val bottom = cpu.rect.bottom
+        val left = cpu.rect.x
+        val top = cpu.rect.y
+        val right = left + cpu.rect.width
+        val bottom = top + cpu.rect.height
 
         enemyRect.set(left, top, right, bottom)
 
@@ -210,10 +296,10 @@ class PongCanvasView @JvmOverloads constructor(
     }
 
     private fun updatePaddleShader() {
-        val left = player.rect.left
-        val right = player.rect.right
-        val top = player.rect.top
-        val bottom = player.rect.bottom
+        val left = player.rect.x
+        val right = left + player.rect.width
+        val top = player.rect.y
+        val bottom = top + player.rect.height
 
         if (right > left) {
             paddleFillPaint.shader = LinearGradient(
@@ -229,11 +315,9 @@ class PongCanvasView @JvmOverloads constructor(
         }
     }
 
-    private fun updateBallShaders() {
-        if (ballX == 0f && ballY == 0f) return
-
+    private fun applyBallShaders(ball: GameBall) {
         ballAuraPaint.shader = RadialGradient(
-            ballX, ballY, auraRadius,
+            ball.x, ball.y, ball.auraRadius,
             intArrayOf(
                 Color.parseColor("#AAFF9100"),
                 Color.parseColor("#00FF9100")
@@ -243,9 +327,9 @@ class PongCanvasView @JvmOverloads constructor(
         )
 
         ballCorePaint.shader = RadialGradient(
-            ballX - ballRadius * 0.25f,
-            ballY - ballRadius * 0.25f,
-            ballRadius * 1.1f,
+            ball.x - ball.radius * 0.25f,
+            ball.y - ball.radius * 0.25f,
+            ball.radius * 1.1f,
             intArrayOf(
                 Color.parseColor("#FFFFFF"),
                 Color.parseColor("#FFD54F"),
@@ -263,15 +347,14 @@ class PongCanvasView @JvmOverloads constructor(
         // 1. Player (Solar - embaixo) via acelerômetro
         player.updateWithAccelerometer(Vector2(accelerationX, 0f), currentBounds)
 
-        // 2. Bola se movendo e quicando
-        updateBall(deltaTime, currentBounds)
+        // 2. Raquete do topo acompanha apenas o X do player
+        syncCpuXWithPlayer()
 
-        // 3. CPU (Lunar - topo) acompanhando a bola
-        cpu.updateTowardBall(ballX, currentBounds)
+        // 3. Atualiza bolinhas, power-up, pontuação e zona de punição
+        updateBalls(deltaTime, currentBounds)
 
         updateEnemyPaddleVisual()
         updatePaddleShader()
-        updateBallShaders()
         invalidate()
     }
 
@@ -284,11 +367,17 @@ class PongCanvasView @JvmOverloads constructor(
 
         if (!isInitialized) return
 
-        // 2. Raquete Lunar (CPU - topo)
+        // 2. Pontuação única centralizada
+        canvas.drawText(score.toString(), width / 2f, height / 2f + 24f, scorePaint)
+
+        // 3. Power-up
+        powerUpManager.draw(canvas)
+
+        // 4. Raquete Lunar (topo)
         canvas.drawRoundRect(enemyRect, 14f, 14f, enemyFillPaint)
         canvas.drawRoundRect(enemyRect, 14f, 14f, enemyBorderPaint)
 
-        // 3. Raquete Solar (Player - embaixo)
+        // 5. Raquete Solar (Player - embaixo)
         val pLeft = player.rect.x
         val pTop = player.rect.y
         val pRight = pLeft + player.rect.width
@@ -301,14 +390,17 @@ class PongCanvasView @JvmOverloads constructor(
         canvas.drawRoundRect(paddleRectF, 14f, 14f, paddleFillPaint)
         canvas.drawRoundRect(paddleRectF, 14f, 14f, paddleBorderPaint)
 
-        // 4. Bola (Eclipse)
-        canvas.drawCircle(ballX, ballY, auraRadius, ballAuraPaint)
-        canvas.drawCircle(ballX, ballY, ballRadius, ballCorePaint)
-        canvas.drawCircle(
-            ballX - ballRadius * 0.35f,
-            ballY - ballRadius * 0.35f,
-            ballRadius * 0.18f,
-            ballHighlightPaint
-        )
+        // 6. Bolinhas amarelas ativas
+        for (ball in balls) {
+            applyBallShaders(ball)
+            canvas.drawCircle(ball.x, ball.y, ball.auraRadius, ballAuraPaint)
+            canvas.drawCircle(ball.x, ball.y, ball.radius, ballCorePaint)
+            canvas.drawCircle(
+                ball.x - ball.radius * 0.35f,
+                ball.y - ball.radius * 0.35f,
+                ball.radius * 0.18f,
+                ballHighlightPaint
+            )
+        }
     }
 }
