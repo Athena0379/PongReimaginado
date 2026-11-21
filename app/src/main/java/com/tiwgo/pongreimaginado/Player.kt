@@ -17,8 +17,8 @@ class Player(
     fun spawnAtStartLine(bounds: GameBounds) {
         val centerX = bounds.minBounds.x + (bounds.maxBounds.x - bounds.minBounds.x) / 2f
 
-        rect.x = centerX
-        rect.y = bounds.maxBounds.y - (rect.height / 2f)
+        rect.x = centerX - (rect.width / 2f)
+        rect.y = bounds.maxBounds.y - rect.height - 24f
 
         bounds.keepInside(rect)
     }
@@ -36,15 +36,13 @@ class Player(
         velocity.x = velocity.x.coerceIn(-maxSpeed, maxSpeed)
 
         val oldX = rect.x
+        val minX = bounds.minBounds.x
+        val maxX = (bounds.maxBounds.x - rect.width).coerceAtLeast(minX)
 
         rect.x += velocity.x
-
         bounds.keepInside(rect)
 
-        val touchedLeft = (rect.x == bounds.minBounds.x && oldX <= bounds.minBounds.x)
-        val touchedRight = (rect.x == bounds.maxBounds.x - rect.width && oldX >= bounds.maxBounds.x - rect.width)
-
-        if (touchedLeft || touchedRight) {
+        if ((rect.x <= minX && oldX <= minX) || (rect.x >= maxX && oldX >= maxX)) {
             velocity.x = 0f
         }
     }

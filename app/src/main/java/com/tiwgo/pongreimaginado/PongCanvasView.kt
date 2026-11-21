@@ -289,10 +289,10 @@ class PongCanvasView @JvmOverloads constructor(
         canvas.drawRoundRect(enemyRect, 14f, 14f, enemyBorderPaint)
 
         // 3. Raquete Solar (Player - embaixo)
-        val pLeft = player.rect.left
-        val pTop = player.rect.top
-        val pRight = player.rect.right
-        val pBottom = player.rect.bottom
+        val pLeft = player.rect.x
+        val pTop = player.rect.y
+        val pRight = pLeft + player.rect.width
+        val pBottom = pTop + player.rect.height
 
         paddleGlowRect.set(pLeft - 6f, pTop - 6f, pRight + 6f, pBottom + 6f)
         canvas.drawRoundRect(paddleGlowRect, 18f, 18f, paddleGlowPaint)
