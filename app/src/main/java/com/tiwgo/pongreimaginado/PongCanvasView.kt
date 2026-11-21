@@ -49,6 +49,9 @@ class PongCanvasView @JvmOverloads constructor(
     var score: Int = 0
         private set
 
+    var isPaused: Boolean = false
+        private set
+
     var bounds: GameBounds? = null
         private set
 
@@ -101,9 +104,36 @@ class PongCanvasView @JvmOverloads constructor(
         color = Color.parseColor("#CCFFFFFF")
         style = Paint.Style.FILL
     }
+    private val pauseOverlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#99000000")
+        style = Paint.Style.FILL
+    }
+    private val pauseTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FFFFFF")
+        textSize = 76f
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    private val pauseHintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#E0F7FA")
+        textSize = 36f
+        textAlign = Paint.Align.CENTER
+    }
 
     private val paddleGlowRect = RectF()
     private val paddleRectF = RectF()
+
+    fun togglePause(): Boolean {
+        isPaused = !isPaused
+        invalidate()
+        return isPaused
+    }
+
+    fun setPaused(paused: Boolean) {
+        if (isPaused == paused) return
+        isPaused = paused
+        invalidate()
+    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -343,6 +373,10 @@ class PongCanvasView @JvmOverloads constructor(
     fun update(deltaTime: Float) {
         val currentBounds = bounds ?: return
         if (!isInitialized) return
+        if (isPaused) {
+            invalidate()
+            return
+        }
 
         // 1. Player (Solar - embaixo) via acelerômetro
         player.updateWithAccelerometer(Vector2(accelerationX, 0f), currentBounds)
@@ -401,6 +435,15 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.radius * 0.18f,
                 ballHighlightPaint
             )
+        }
+
+        // 7. Overlay de pausa
+        if (isPaused) {
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), pauseOverlayPaint)
+            val centerX = width / 2f
+            val centerY = height / 2f
+            canvas.drawText("PAUSADO", centerX, centerY - 16f, pauseTitlePaint)
+            canvas.drawText("Toque na tela para continuar", centerX, centerY + 46f, pauseHintPaint)
         }
     }
 }

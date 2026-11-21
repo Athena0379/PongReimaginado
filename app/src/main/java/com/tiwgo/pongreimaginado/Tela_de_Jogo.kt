@@ -13,6 +13,10 @@ import androidx.appcompat.app.AppCompatActivity
 
 class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEventListener {
 
+    companion object {
+        const val EXTRA_SCORE = "EXTRA_SCORE"
+    }
+
     var isRunning: Boolean = false
         private set
 
@@ -37,6 +41,15 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         powerUpManager = pongCanvasView.powerUpManager
         currentScore = pongCanvasView.score
 
+        pongCanvasView.setOnClickListener {
+            if (!hasNavigatedToResults) {
+                val paused = pongCanvasView.togglePause()
+                if (!paused) {
+                    lastFrameTimeNanos = 0L
+                }
+            }
+        }
+
         pongCanvasView.onGameOver = {
             currentScore = pongCanvasView.score
             goToResultsScreen()
@@ -52,12 +65,14 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
             sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
         }
         if (!hasNavigatedToResults) {
+            lastFrameTimeNanos = 0L
             start()
         }
     }
 
     override fun onPause() {
         super.onPause()
+        pongCanvasView.setPaused(true)
         stop()
         sensorManager.unregisterListener(this)
     }
@@ -103,9 +118,8 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         stop()
         sensorManager.unregisterListener(this)
 
-        // Substitua `Tela_de_Resultados::class.java` pelo nome exato da sua Activity de resultados
         val intent = Intent(this, Tela_Final_com_Pontuacao::class.java).apply {
-            putExtra("EXTRA_SCORE", currentScore)
+            putExtra(EXTRA_SCORE, currentScore)
         }
         startActivity(intent)
         finish()
