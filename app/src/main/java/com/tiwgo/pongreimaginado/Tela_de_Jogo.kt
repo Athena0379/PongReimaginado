@@ -8,6 +8,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
 import android.view.Choreographer
+import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 
@@ -27,19 +28,32 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
 
     private lateinit var pongCanvasView: PongCanvasView
     private lateinit var powerUpManager: PowerUpManager
+    private lateinit var saveManager: GameSaveManager
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
 
     private var hasNavigatedToResults: Boolean = false
+    private var hasRestoredSavedGame: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_tela_de_jogo)
 
+        saveManager = GameSaveManager(this)
         pongCanvasView = findViewById(R.id.pongCanvasView)
         powerUpManager = pongCanvasView.powerUpManager
         currentScore = pongCanvasView.score
+
+        val shouldLoadSavedGame = intent.getBooleanExtra(
+            GameSaveManager.EXTRA_LOAD_SAVED_GAME,
+            false
+        )
+
+        if (shouldLoadSavedGame) {
+            restoreSavedGameIfReady()
+        }
 
         pongCanvasView.setOnClickListener {
             if (!hasNavigatedToResults) {
@@ -59,6 +73,22 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     }
 
+    private fun restoreSavedGameIfReady() {
+        if (hasRestoredSavedGame) return
+
+        pongCanvasView.post {
+            if (hasRestoredSavedGame || hasNavigatedToResults) return@post
+            if (pongCanvasView.isInitialized && pongCanvasView.bounds != null) {
+                saveManager.loadGame()?.let { savedState ->
+                    pongCanvasView.restoreSavedState(savedState)
+                    currentScore = pongCanvasView.score
+                    hasRestoredSavedGame = true
+                    lastFrameTimeNanos = 0L
+                }
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         accelerometer?.let { sensor ->
@@ -72,6 +102,9 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
 
     override fun onPause() {
         super.onPause()
+        if (!hasNavigatedToResults && pongCanvasView.isInitialized) {
+            saveManager.saveGame(pongCanvasView.exportSaveState())
+        }
         pongCanvasView.setPaused(true)
         stop()
         sensorManager.unregisterListener(this)
@@ -115,6 +148,7 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
     private fun goToResultsScreen() {
         if (hasNavigatedToResults) return
         hasNavigatedToResults = true
+        saveManager.clearSave()
         stop()
         sensorManager.unregisterListener(this)
 
@@ -132,6 +166,6 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // Sem necessidade no teste inicial
+
     }
 }

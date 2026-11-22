@@ -63,8 +63,6 @@ class PongCanvasView @JvmOverloads constructor(
     private val baseSpeed: Float = 760f
     private val balls = mutableListOf<GameBall>()
     private var isGameOverTriggered = false
-
-    // Raquete lunar (topo - alinhada ao X do player)
     private val enemyRect = RectF()
     private val enemyFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -74,8 +72,6 @@ class PongCanvasView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 3f
     }
-
-    // Paints reutilizados no onDraw
     private val scorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#66FFFFFF")
         textSize = 72f
@@ -135,6 +131,82 @@ class PongCanvasView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun exportSaveState(): SavedGameState {
+        val ballStates = balls.map { ball ->
+            SavedBallState(
+                x = ball.x,
+                y = ball.y,
+                vx = ball.vx,
+                vy = ball.vy,
+                radius = ball.radius,
+                auraRadius = ball.auraRadius
+            )
+        }
+
+        val orb = powerUpManager.orb
+        val powerUpState = SavedPowerUpState(
+            x = orb.x,
+            y = orb.y,
+            radius = orb.radius,
+            auraRadius = orb.auraRadius,
+            isActive = orb.isActive
+        )
+
+        return SavedGameState(
+            score = score,
+            playerX = player.rect.x,
+            cpuX = cpu.rect.x,
+            balls = ballStates,
+            powerUp = powerUpState
+        )
+    }
+
+    fun restoreSavedState(state: SavedGameState) {
+        val currentBounds = bounds ?: return
+
+        score = state.score
+        isGameOverTriggered = false
+
+        player.rect.x = state.playerX
+        currentBounds.keepInside(player.rect)
+
+        cpu.rect.x = state.cpuX
+        currentBounds.keepInside(cpu.rect)
+
+        balls.clear()
+        for (savedBall in state.balls) {
+            balls.add(
+                GameBall(
+                    x = savedBall.x.coerceIn(savedBall.radius, currentBounds.maxBounds.x - savedBall.radius),
+                    y = savedBall.y.coerceIn(savedBall.radius, currentBounds.maxBounds.y - savedBall.radius),
+                    vx = savedBall.vx,
+                    vy = savedBall.vy,
+                    radius = savedBall.radius,
+                    auraRadius = savedBall.auraRadius
+                )
+            )
+        }
+
+        state.powerUp?.let { savedOrb ->
+            powerUpManager.orb.isActive = savedOrb.isActive
+            if (savedOrb.isActive) {
+                powerUpManager.spawnRandomly(currentBounds)
+                powerUpManager.orb.x = savedOrb.x.coerceIn(
+                    currentBounds.minBounds.x + savedOrb.auraRadius + 16f,
+                    currentBounds.maxBounds.x - savedOrb.auraRadius - 16f
+                )
+                powerUpManager.orb.y = savedOrb.y.coerceIn(
+                    currentBounds.minBounds.y + 180f,
+                    currentBounds.maxBounds.y - 180f
+                )
+            }
+        }
+
+        updateEnemyPaddleVisual()
+        updatePaddleShader()
+        invalidate()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w > 0 && h > 0) {
@@ -172,10 +244,6 @@ class PongCanvasView @JvmOverloads constructor(
             updatePaddleShader()
         }
     }
-
-    /**
-     * Cria e adiciona uma nova bolinha amarela na partida.
-     */
     fun createBall(
         x: Float,
         y: Float,
@@ -240,7 +308,6 @@ class PongCanvasView @JvmOverloads constructor(
             ball.x += ball.vx * deltaTime
             ball.y += ball.vy * deltaTime
 
-            // Colisão com paredes laterais
             if (ball.x - ball.radius < leftBound) {
                 ball.x = leftBound + ball.radius
                 ball.vx = abs(ball.vx)
@@ -248,8 +315,6 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.x = rightBound - ball.radius
                 ball.vx = -abs(ball.vx)
             }
-
-            // Colisão com a raquete do topo quando a bola está subindo -> +1 ponto
             if (ball.vy < 0f &&
                 ball.y - ball.radius <= cpuBottom &&
                 ball.y + ball.radius >= cpuTop &&
@@ -263,8 +328,6 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.vy = abs(ball.vy)
                 score++
             }
-
-            // Colisão com a raquete de baixo quando a bola está descendo -> +1 ponto
             if (ball.vy > 0f &&
                 ball.y + ball.radius >= pTop &&
                 ball.y - ball.radius <= pBottom &&
@@ -278,24 +341,18 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.vy = -abs(ball.vy)
                 score++
             }
-
-            // Colisão com o power-up
             if (powerUpManager.isHitByBall(ball.x, ball.y, ball.radius)) {
                 ballsThatConsumedPowerUp.add(ball)
             }
-
-            // Zona de punição: destrói a bolinha em vez de resetar
             if (isPastPunishmentZone(ball, currentBounds)) {
                 iterator.remove()
             }
         }
 
-        // Gera nova bolinha e reposiciona o power-up após iterar com segurança
         for (source in ballsThatConsumedPowerUp) {
             spawnNewBallFromPowerUp(source, currentBounds)
         }
 
-        // Sem bolinhas restantes -> encerra o jogo e vai para a tela de resultados
         if (balls.isEmpty() && !isGameOverTriggered) {
             isGameOverTriggered = true
             powerUpManager.orb.isActive = false
@@ -378,15 +435,10 @@ class PongCanvasView @JvmOverloads constructor(
             return
         }
 
-        // 1. Player (Solar - embaixo) via acelerômetro
         player.updateWithAccelerometer(Vector2(accelerationX, 0f), currentBounds)
 
-        // 2. Raquete do topo acompanha apenas o X do player
         syncCpuXWithPlayer()
-
-        // 3. Atualiza bolinhas, power-up, pontuação e zona de punição
         updateBalls(deltaTime, currentBounds)
-
         updateEnemyPaddleVisual()
         updatePaddleShader()
         invalidate()
@@ -395,23 +447,18 @@ class PongCanvasView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // 1. Background
         backgroundDrawable?.setBounds(0, 0, width, height)
         backgroundDrawable?.draw(canvas)
 
         if (!isInitialized) return
 
-        // 2. Pontuação única centralizada
         canvas.drawText(score.toString(), width / 2f, height / 2f + 24f, scorePaint)
 
-        // 3. Power-up
         powerUpManager.draw(canvas)
 
-        // 4. Raquete Lunar (topo)
         canvas.drawRoundRect(enemyRect, 14f, 14f, enemyFillPaint)
         canvas.drawRoundRect(enemyRect, 14f, 14f, enemyBorderPaint)
 
-        // 5. Raquete Solar (Player - embaixo)
         val pLeft = player.rect.x
         val pTop = player.rect.y
         val pRight = pLeft + player.rect.width
@@ -424,7 +471,6 @@ class PongCanvasView @JvmOverloads constructor(
         canvas.drawRoundRect(paddleRectF, 14f, 14f, paddleFillPaint)
         canvas.drawRoundRect(paddleRectF, 14f, 14f, paddleBorderPaint)
 
-        // 6. Bolinhas amarelas ativas
         for (ball in balls) {
             applyBallShaders(ball)
             canvas.drawCircle(ball.x, ball.y, ball.auraRadius, ballAuraPaint)
@@ -436,8 +482,6 @@ class PongCanvasView @JvmOverloads constructor(
                 ballHighlightPaint
             )
         }
-
-        // 7. Overlay de pausa
         if (isPaused) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), pauseOverlayPaint)
             val centerX = width / 2f
