@@ -29,6 +29,7 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
     private lateinit var pongCanvasView: PongCanvasView
     private lateinit var powerUpManager: PowerUpManager
     private lateinit var saveManager: GameSaveManager
+    private lateinit var soundManager: SoundManager
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
 
@@ -42,7 +43,11 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         setContentView(R.layout.activity_tela_de_jogo)
 
         saveManager = GameSaveManager(this)
+        soundManager = SoundManager(this)
+
         pongCanvasView = findViewById(R.id.pongCanvasView)
+        pongCanvasView.soundManager = soundManager
+
         powerUpManager = pongCanvasView.powerUpManager
         currentScore = pongCanvasView.score
 
@@ -58,6 +63,7 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         pongCanvasView.setOnClickListener {
             if (!hasNavigatedToResults) {
                 val paused = pongCanvasView.togglePause()
+                soundManager.setPausedByGameToggle(paused)
                 if (!paused) {
                     lastFrameTimeNanos = 0L
                 }
@@ -71,6 +77,11 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    }
+
+    override fun onDestroy() {
+        soundManager.releaseEffects()
+        super.onDestroy()
     }
 
     private fun restoreSavedGameIfReady() {
@@ -94,6 +105,7 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
         accelerometer?.let { sensor ->
             sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
         }
+        SoundManager.onScreenResume(this)
         if (!hasNavigatedToResults) {
             lastFrameTimeNanos = 0L
             start()
@@ -102,6 +114,7 @@ class Tela_de_Jogo : AppCompatActivity(), Choreographer.FrameCallback, SensorEve
 
     override fun onPause() {
         super.onPause()
+        SoundManager.onScreenPause()
         if (!hasNavigatedToResults && pongCanvasView.isInitialized) {
             saveManager.saveGame(pongCanvasView.exportSaveState())
         }

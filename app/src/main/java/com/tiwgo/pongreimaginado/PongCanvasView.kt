@@ -44,6 +44,7 @@ class PongCanvasView @JvmOverloads constructor(
 
     val powerUpManager = PowerUpManager()
 
+    var soundManager: SoundManager? = null
     var onGameOver: (() -> Unit)? = null
 
     var score: Int = 0
@@ -244,6 +245,7 @@ class PongCanvasView @JvmOverloads constructor(
             updatePaddleShader()
         }
     }
+
     fun createBall(
         x: Float,
         y: Float,
@@ -315,6 +317,7 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.x = rightBound - ball.radius
                 ball.vx = -abs(ball.vx)
             }
+
             if (ball.vy < 0f &&
                 ball.y - ball.radius <= cpuBottom &&
                 ball.y + ball.radius >= cpuTop &&
@@ -327,7 +330,9 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.vx = hitOffset * (baseSpeed * 0.85f)
                 ball.vy = abs(ball.vy)
                 score++
+                soundManager?.playBounce()
             }
+
             if (ball.vy > 0f &&
                 ball.y + ball.radius >= pTop &&
                 ball.y - ball.radius <= pBottom &&
@@ -340,12 +345,17 @@ class PongCanvasView @JvmOverloads constructor(
                 ball.vx = hitOffset * (baseSpeed * 0.85f)
                 ball.vy = -abs(ball.vy)
                 score++
+                soundManager?.playBounce()
             }
+
             if (powerUpManager.isHitByBall(ball.x, ball.y, ball.radius)) {
                 ballsThatConsumedPowerUp.add(ball)
+                soundManager?.playPowerUp()
             }
+
             if (isPastPunishmentZone(ball, currentBounds)) {
                 iterator.remove()
+                soundManager?.playPunishment()
             }
         }
 
@@ -482,6 +492,7 @@ class PongCanvasView @JvmOverloads constructor(
                 ballHighlightPaint
             )
         }
+
         if (isPaused) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), pauseOverlayPaint)
             val centerX = width / 2f

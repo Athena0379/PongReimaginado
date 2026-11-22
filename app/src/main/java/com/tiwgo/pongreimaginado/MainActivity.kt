@@ -43,6 +43,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateSavedGameButtonState()
+        SoundManager.onScreenResume(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        SoundManager.onScreenPause()
     }
 
     private fun updateSavedGameButtonState() {
